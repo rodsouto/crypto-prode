@@ -39,6 +39,7 @@ contract Prode is Ownable, ERC1155Holder {
 
     event MatchAdded(uint256 round, uint256 matchIndex, bytes32 questionId, bytes32 conditionId);
     event BetPlaced(uint256 round, uint256 matchIndex, address player, uint8 bet);
+    event NewPlayerPosition(address player, address collateral, bytes32 conditionId, uint256 playerSet, uint256 amount);
 
     constructor(ConditionalTokens _conditionalTokens, address _oracle, IERC20 _collateral, uint256 _amount) {
         conditionalTokens = _conditionalTokens;
@@ -127,14 +128,16 @@ contract Prode is Ownable, ERC1155Holder {
             conditionalTokens.getPositionId(
                 collateral, 
                 conditionalTokens.getCollectionId(
-                    0, 
-                    conditionId, 
+                    0,
+                    conditionId,
                     playerSet
                 )
             ),
             amount,
             bytes("")
         );
+
+        emit NewPlayerPosition(msg.sender, address(collateral), conditionId, playerSet, amount);
 
         // TODO: should/can we split the prodeSet position?
     }

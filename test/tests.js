@@ -1,6 +1,29 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
+const NEW_PLAYER_POSITION_EVENT = "event NewPlayerPosition(address player, address collateral, bytes32 conditionId, uint256 playerSet, uint256 amount);";
+
+function getEvents(receipt, eventAbi) {
+  let iface = new ethers.utils.Interface([eventAbi]);
+  return receipt.logs.map((log) => {
+    try {
+      return iface.parseLog(log);
+    } catch (e) {
+      return null;
+    }
+  }).filter(Boolean);
+}
+function getConditions(txReceipt) {
+  const result = {conditionsIds: [], indexSets: []};
+
+  getEvents(txReceipt, NEW_PLAYER_POSITION_EVENT).forEach(event => {
+    result.conditionsIds.push(event.args.conditionId);
+    result.indexSets.push([event.args.playerSet.toString()]);
+  });
+
+  return result;
+}
+
 describe("Prode", function () {
 
   let prode;
@@ -85,9 +108,9 @@ describe("Prode", function () {
       await prode.addMatches(matches, 3);
 
       // place bets
-      await prode.connect(rodri).placeBets([0, 0], 0); // argentina, mexico
-      await prode.connect(koki).placeBets([0, 1], 0); // argentina, poland
-      await prode.connect(fede).placeBets([2, 2], 0); // draw, draw
+      const tx1 = await prode.connect(rodri).placeBets([0, 0], 0); // argentina, mexico
+      const tx2 = await prode.connect(koki).placeBets([0, 1], 0); // argentina, poland
+      const tx3 = await prode.connect(fede).placeBets([2, 2], 0); // draw, draw
 
       // report results
       await conditionalTokens.connect(oracle).reportPayouts(matches[0], [1, 0, 0]); // argentina wins
@@ -99,12 +122,17 @@ describe("Prode", function () {
       await prode.connect(fede).distributePositions(0);
 
       // redeem tokens
-      // TODO: we need to have conditionsIds and indexSets to redeem the positions
-      /*await conditionalTokens.connect(rodri).redeemMultiPositions(mockDAI.address, bytes32 parentCollectionId, bytes32[] calldata conditionsIds, uint[] calldata indexSets);
-      await conditionalTokens.connect(koki).redeemMultiPositions(mockDAI.address, bytes32 parentCollectionId, bytes32[] calldata conditionsIds, uint[] calldata indexSets);
-      await conditionalTokens.connect(fede).redeemMultiPositions(mockDAI.address, bytes32 parentCollectionId, bytes32[] calldata conditionsIds, uint[] calldata indexSets);*/
+      const tx1Conditions = getConditions(await tx1.wait());
+      const tx2Conditions = getConditions(await tx2.wait());
+      const tx3Conditions = getConditions(await tx3.wait());
 
-      // TODO: check results (rodri 1.5+3 DAI , koki 1.5 DAI, fede 0 DAI)
+      await conditionalTokens.connect(rodri).redeemMultiPositions(mockDAI.address, ethers.constants.HashZero, tx1Conditions.conditionsIds, tx1Conditions.indexSets);
+      await conditionalTokens.connect(koki).redeemMultiPositions(mockDAI.address, ethers.constants.HashZero, tx2Conditions.conditionsIds, tx2Conditions.indexSets);
+      await conditionalTokens.connect(fede).redeemMultiPositions(mockDAI.address, ethers.constants.HashZero, tx3Conditions.conditionsIds, tx3Conditions.indexSets);
+
+      expect((await mockDAI.balanceOf(rodri.address)).toString()).to.equal('4500000000000000000');
+      expect((await mockDAI.balanceOf(koki.address)).toString()).to.equal('1500000000000000000');
+      expect((await mockDAI.balanceOf(fede.address)).toString()).to.equal('0');
     });
   });
 

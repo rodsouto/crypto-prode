@@ -263,11 +263,11 @@ contract ConditionalTokens is ERC1155Supply {
         emit PayoutRedemption(msg.sender, collateralToken, parentCollectionId, conditionId, indexSets, totalPayout);
     }
 
-    function redeemMultiPositions(IERC20 collateralToken, bytes32 parentCollectionId, bytes32[] calldata conditionsIds, uint[] calldata indexSets) external {
+    function redeemMultiPositions(IERC20 collateralToken, bytes32 parentCollectionId, bytes32[] calldata conditionsIds, uint[][] calldata indexSets) external {
         uint256 len = conditionsIds.length;
 
         for(uint256 i = 0; i < len; i++) {
-            redeemPositions(collateralToken, parentCollectionId, conditionsIds[i], indexSets);
+            redeemPositions(collateralToken, parentCollectionId, conditionsIds[i], indexSets[i]);
         }
     }
 
