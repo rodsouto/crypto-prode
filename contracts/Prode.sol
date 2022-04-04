@@ -1,10 +1,11 @@
 pragma solidity ^0.8.13;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { ERC1155Holder } from "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./ConditionalTokens.sol";
 
-contract Prode is Ownable {
+contract Prode is Ownable, ERC1155Holder {
 
     struct Match {
         bytes32 questionId;
@@ -44,6 +45,8 @@ contract Prode is Ownable {
         oracle = _oracle;
         collateral = _collateral;
         amount = _amount;
+
+        collateral.approve(address(conditionalTokens), type(uint256).max);
     }
 
     /**
@@ -83,13 +86,11 @@ contract Prode is Ownable {
         require(!roundBets[roundNumber][msg.sender], "Already placed bets in this round");
 
         // TODO: deduce fee?
-        collateral.transferFrom(msg.sender, address(this), bets.length * amount);
+        require(collateral.transferFrom(msg.sender, address(this), bets.length * amount));
 
         uint256 len = bets.length;
 
         roundBets[roundNumber][msg.sender] = true;
-
-        uint256[] memory allIndexSets = getAllIndexSets(roundsOutcomes[roundNumber]);
 
         for(uint256 i = 0; i < len; i++) {
             require(bets[i] < roundsOutcomes[roundNumber], "Invalid bet value");
@@ -97,7 +98,7 @@ contract Prode is Ownable {
             splitPosition(
                 rounds[roundNumber][i].conditionId, 
                 getPlayerSet(bets[i], roundsOutcomes[roundNumber]), 
-                allIndexSets
+                getProdeSet(bets[i], roundsOutcomes[roundNumber])
             );
 
             emit BetPlaced(totalRounds, i, msg.sender, bets[i]);
@@ -107,12 +108,16 @@ contract Prode is Ownable {
     /**
      * @dev The player receives the conditional tokens representing his bet and we keep the tokens representing the other outcomes.
      */
-    function splitPosition(bytes32 conditionId, uint256 playerSet, uint256[] memory allIndexSets) internal {
+    function splitPosition(bytes32 conditionId, uint256 playerSet, uint256 prodeSet) internal {
+        uint256[] memory indexSet = new uint256[](2);
+        indexSet[0] = playerSet;
+        indexSet[1] = prodeSet;
+
         conditionalTokens.splitPosition(
             collateral,
             0,
             conditionId,
-            allIndexSets,
+            indexSet,
             amount
         );
 
@@ -130,6 +135,8 @@ contract Prode is Ownable {
             amount,
             bytes("")
         );
+
+        // TODO: should/can we split the prodeSet position?
     }
 
     /**
@@ -208,13 +215,49 @@ contract Prode is Ownable {
         *
         * Win 1 | Win 2 | Draw
         * 1        0       0     = 0b001 = 1
-        * 0        1       0     = 0b010 = 2        *
+        * 0        1       0     = 0b010 = 2
         * 0        0       1     = 0b100 = 4
         */
         return value == 0 ? 1 : (value == 1 ? 2: 4);
     }
 
+    /**
+     * @dev returns a set containing the values not selected by the player
+     */
+    function getProdeSet(uint8 value, uint8 outcomeSlots) internal pure returns (uint256) {
+        if (outcomeSlots == 2) {
+            /**
+            * Outcomes = 2
+            *
+            * value=0 if team 1 win, value=1 if team 2 win
+            *
+            * Win 1 | Win 2
+            * 1        0       = 0b01 = 1
+            * 0        1       = 0b10 = 2
+            */
+
+            return value == 0 ? 2 : 1;
+        }
+
+        /**
+        * Outcomes = 3
+        *
+        * value=0 if team 1 win, value=1 if team 2 win, value=2 if draw
+        *
+        * Win 1 | Win 2 | Draw
+        * 1        0       0     = 0b001 = 1
+        * 0        1       1     = 0b110 = 6
+        * 0        1       0     = 0b010 = 2
+        * 1        0       1     = 0b101 = 5
+        * 0        0       1     = 0b100 = 4
+        * 1        1       0     = 0b011 = 3
+        */
+        return value == 0 ? 6 : (value == 1 ? 5: 3);
+    }
+
     function getAllIndexSets(uint8 outcomeSlots) internal pure returns (uint256[] memory indexSets) {
+        indexSets = new uint256[](3);
+
         indexSets[0] = 1;
         indexSets[1] = 2;
 
