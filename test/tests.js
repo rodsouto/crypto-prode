@@ -1,7 +1,8 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-const NEW_PLAYER_POSITION_EVENT = "event NewPlayerPosition(address player, address collateral, bytes32 conditionId, uint256 playerSet, uint256 amount);";
+const BET_PLACER_EVENT = "event BetPlaced(uint256 round, bytes32 conditionId, uint256 matchIndex, address player, uint8 bet)";
+const POSITION_SPLIT_EVENT = "event PositionSplit(address indexed stakeholder, address collateralToken, bytes32 indexed parentCollectionId, bytes32 indexed conditionId, uint[] partition, uint amount);";
 
 function getEvents(receipt, eventAbi) {
   let iface = new ethers.utils.Interface([eventAbi]);
@@ -14,14 +15,13 @@ function getEvents(receipt, eventAbi) {
   }).filter(Boolean);
 }
 function getConditions(txReceipt) {
-  const result = {conditionsIds: [], indexSets: []};
+  const conditions = [];
 
-  getEvents(txReceipt, NEW_PLAYER_POSITION_EVENT).forEach(event => {
-    result.conditionsIds.push(event.args.conditionId);
-    result.indexSets.push([event.args.playerSet.toString()]);
+  getEvents(txReceipt, BET_PLACER_EVENT).forEach(event => {
+    conditions.push(event.args.conditionId);
   });
 
-  return result;
+  return conditions;
 }
 
 describe("Prode", function () {
@@ -51,18 +51,12 @@ describe("Prode", function () {
       const [owner, oracle, notOwner] = await ethers.getSigners();
 
       await expect(
-        prode.connect(notOwner).addMatches(['0x0000000000000000000000000000000000000000000000000000000000000001'], 2)
+        prode.connect(notOwner).addMatches(['0x0000000000000000000000000000000000000000000000000000000000000001'])
       ).to.be.revertedWith("Ownable: caller is not the owner");
     });
 
-    it("Should fail if outcomeSlotCount is invalid", async function () {
-      await expect(
-        prode.addMatches(['0x0000000000000000000000000000000000000000000000000000000000000001'], 4)
-      ).to.be.revertedWith("Invalid outcomeSlotCount");
-    });
-
     it("Should emit MatchAdded event", async function () {
-      await expect(prode.addMatches(['0x0000000000000000000000000000000000000000000000000000000000000001'], 2)).to.emit(prode, "MatchAdded");
+      await expect(prode.addMatches(['0x0000000000000000000000000000000000000000000000000000000000000001'])).to.emit(prode, "MatchAdded");
     });
   });
 
@@ -100,40 +94,38 @@ describe("Prode", function () {
       await mockDAI.mint(fede.address, twoDAI);
       await mockDAI.mint(koki.address, twoDAI);
 
-      await mockDAI.connect(rodri).approve(prode.address, twoDAI);
-      await mockDAI.connect(koki).approve(prode.address, twoDAI);
-      await mockDAI.connect(fede).approve(prode.address, twoDAI);
+      await mockDAI.connect(rodri).approve(conditionalTokens.address, twoDAI);
+      await mockDAI.connect(koki).approve(conditionalTokens.address, twoDAI);
+      await mockDAI.connect(fede).approve(conditionalTokens.address, twoDAI);
 
       // create match
-      await prode.addMatches(matches, 3);
+      await prode.addMatches(matches);
 
       // place bets
-      const tx1 = await prode.connect(rodri).placeBets([0, 0], 0); // argentina, mexico
-      const tx2 = await prode.connect(koki).placeBets([0, 1], 0); // argentina, poland
-      const tx3 = await prode.connect(fede).placeBets([2, 2], 0); // draw, draw
+      const tx1 = await prode.connect(rodri).placeBets([1, 1], 0); // argentina, mexico
+      const tx2 = await prode.connect(koki).placeBets([1, 2], 0); // argentina, poland
+      const tx3 = await prode.connect(fede).placeBets([3, 3], 0); // draw, draw
 
       // report results
-      await conditionalTokens.connect(oracle).reportPayouts(matches[0], [1, 0, 0]); // argentina wins
-      await conditionalTokens.connect(oracle).reportPayouts(matches[1], [1, 0, 0]); // mexico wins
-
-      // distribute positions
-      await prode.connect(rodri).distributePositions(0);
-      await prode.connect(koki).distributePositions(0);
-      await prode.connect(fede).distributePositions(0);
+      await conditionalTokens.connect(oracle).reportPayouts(matches[0], 1); // argentina wins
+      await conditionalTokens.connect(oracle).reportPayouts(matches[1], 1); // mexico wins
 
       // redeem tokens
       const tx1Conditions = getConditions(await tx1.wait());
       const tx2Conditions = getConditions(await tx2.wait());
       const tx3Conditions = getConditions(await tx3.wait());
 
-      await conditionalTokens.connect(rodri).redeemMultiPositions(mockDAI.address, ethers.constants.HashZero, tx1Conditions.conditionsIds, tx1Conditions.indexSets);
-      await conditionalTokens.connect(koki).redeemMultiPositions(mockDAI.address, ethers.constants.HashZero, tx2Conditions.conditionsIds, tx2Conditions.indexSets);
-      await conditionalTokens.connect(fede).redeemMultiPositions(mockDAI.address, ethers.constants.HashZero, tx3Conditions.conditionsIds, tx3Conditions.indexSets);
+      await conditionalTokens.connect(rodri).redeemPositions(mockDAI.address, tx1Conditions);
+      await conditionalTokens.connect(koki).redeemPositions(mockDAI.address, tx2Conditions);
+      await conditionalTokens.connect(fede).redeemPositions(mockDAI.address, tx3Conditions);
 
+      // test results
       expect((await mockDAI.balanceOf(rodri.address)).toString()).to.equal('4500000000000000000');
       expect((await mockDAI.balanceOf(koki.address)).toString()).to.equal('1500000000000000000');
       expect((await mockDAI.balanceOf(fede.address)).toString()).to.equal('0');
     });
+
+  
   });
 
 });
